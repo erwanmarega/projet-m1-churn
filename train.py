@@ -1,10 +1,12 @@
 import os
 import pickle
-import numpy as np
+
+import pandas as pd
 from imblearn.over_sampling import SMOTE
 from imblearn.pipeline import Pipeline as ImbPipeline
 from sklearn.ensemble import HistGradientBoostingClassifier, RandomForestClassifier
 from sklearn.linear_model import LogisticRegression
+from sklearn.metrics import f1_score, recall_score
 from sklearn.model_selection import StratifiedKFold, cross_val_score, train_test_split
 from sklearn.neural_network import MLPClassifier
 from sklearn.pipeline import Pipeline
@@ -119,14 +121,6 @@ def main():
     print(f"  F1      : {cv_f1.mean():.4f} ± {cv_f1.std():.4f}")
     print(f"  ROC-AUC : {cv_roc.mean():.4f} ± {cv_roc.std():.4f}")
 
-    file_map = {
-        "Logistic Regression": "logistic_regression",
-        "Random Forest": "random_forest",
-        "Gradient Boosting": "gradient_boosting",
-        "MLP": "mlp",
-    }
-    for name, slug in file_map.items():
-        path = os.path.join(MODELS_DIR, f"{slug}.pkl")
     print("\n[COMPARAISON RÉÉQUILIBRAGE]")
     rf_no_balance = Pipeline([
         ("prep", build_preprocessor()),
@@ -140,10 +134,10 @@ def main():
     ])
     rf_class_weight.fit(X_tr, y_tr)
 
-    import pandas as pd
-    from sklearn.metrics import recall_score
     imbalance_results = []
-    for label, m in [("Sans rééquilibrage", rf_no_balance), ("class_weight", rf_class_weight), ("SMOTE", rf_base)]:
+    for label, m in [("Sans rééquilibrage", rf_no_balance),
+                     ("class_weight", rf_class_weight),
+                     ("SMOTE", fitted_raw["Random Forest"])]:
         thresh = find_best_threshold(m, X_val, y_val)
         y_proba = m.predict_proba(X_test)[:, 1]
         y_pred = (y_proba >= thresh).astype(int)
@@ -157,8 +151,14 @@ def main():
     print(df_imbalance.to_string())
     df_imbalance.to_csv(os.path.join(RESULTS_DIR, "imbalance_comparison.csv"))
 
-    for name, model in {"logistic_regression": lr_pipeline, "random_forest": rf_pipeline}.items():
-        path = os.path.join(MODELS_DIR, f"{name}.pkl")
+    file_map = {
+        "Logistic Regression": "logistic_regression",
+        "Random Forest": "random_forest",
+        "Gradient Boosting": "gradient_boosting",
+        "MLP": "mlp",
+    }
+    for name, slug in file_map.items():
+        path = os.path.join(MODELS_DIR, f"{slug}.pkl")
         with open(path, "wb") as f:
             pickle.dump(fitted_thresh[name], f)
         print(f"Modèle sauvegardé : {path}")
