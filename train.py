@@ -116,6 +116,36 @@ def main():
     print(f"  F1      : {cv_f1.mean():.4f} ± {cv_f1.std():.4f}")
     print(f"  ROC-AUC : {cv_roc.mean():.4f} ± {cv_roc.std():.4f}")
 
+    print("\n[COMPARAISON RÉÉQUILIBRAGE]")
+    rf_no_balance = Pipeline([
+        ("prep", build_preprocessor()),
+        ("model", RandomForestClassifier(n_estimators=200, min_samples_leaf=5, random_state=RANDOM_STATE, n_jobs=-1)),
+    ])
+    rf_no_balance.fit(X_tr, y_tr)
+
+    rf_class_weight = Pipeline([
+        ("prep", build_preprocessor()),
+        ("model", RandomForestClassifier(n_estimators=200, min_samples_leaf=5, class_weight="balanced", random_state=RANDOM_STATE, n_jobs=-1)),
+    ])
+    rf_class_weight.fit(X_tr, y_tr)
+
+    import pandas as pd
+    from sklearn.metrics import recall_score
+    imbalance_results = []
+    for label, m in [("Sans rééquilibrage", rf_no_balance), ("class_weight", rf_class_weight), ("SMOTE", rf_base)]:
+        thresh = find_best_threshold(m, X_val, y_val)
+        y_proba = m.predict_proba(X_test)[:, 1]
+        y_pred = (y_proba >= thresh).astype(int)
+        imbalance_results.append({
+            "technique": label,
+            "seuil": round(thresh, 2),
+            "recall_churn": round(recall_score(y_test, y_pred), 4),
+            "f1_churn": round(f1_score(y_test, y_pred, zero_division=0), 4),
+        })
+    df_imbalance = pd.DataFrame(imbalance_results).set_index("technique")
+    print(df_imbalance.to_string())
+    df_imbalance.to_csv(os.path.join(RESULTS_DIR, "imbalance_comparison.csv"))
+
     for name, model in {"logistic_regression": lr_pipeline, "random_forest": rf_pipeline}.items():
         path = os.path.join(MODELS_DIR, f"{name}.pkl")
         with open(path, "wb") as f:

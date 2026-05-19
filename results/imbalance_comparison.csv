@@ -1,0 +1,4 @@
+technique,seuil,recall_churn,f1_churn
+Sans rééquilibrage,0.17,0.7353,0.3827
+class_weight,0.24,0.8431,0.378
+SMOTE,0.22,0.7794,0.3728
