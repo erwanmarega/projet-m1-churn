@@ -1,22 +1,25 @@
 import os
 import pickle
-import numpy as np
-from sklearn.linear_model import LogisticRegression
-from sklearn.ensemble import RandomForestClassifier
-from sklearn.model_selection import train_test_split, StratifiedKFold, cross_val_score
-from sklearn.pipeline import Pipeline
-from sklearn.metrics import f1_score
+
+import pandas as pd
 from imblearn.over_sampling import SMOTE
 from imblearn.pipeline import Pipeline as ImbPipeline
+from sklearn.ensemble import HistGradientBoostingClassifier, RandomForestClassifier
+from sklearn.linear_model import LogisticRegression
+from sklearn.metrics import f1_score, recall_score
+from sklearn.model_selection import StratifiedKFold, cross_val_score, train_test_split
+from sklearn.neural_network import MLPClassifier
+from sklearn.pipeline import Pipeline
 
-from src.preprocessing import load_data, build_preprocessor
 from src.evaluate import (
     evaluate_model,
     plot_confusion_matrix,
-    plot_roc_curves,
     plot_pr_curves,
+    plot_roc_curves,
     save_comparison_table,
 )
+from src.preprocessing import build_preprocessor, load_data
+from src.threshold import ThresholdClassifier, find_best_threshold
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 DATA_PATH = os.path.join(BASE_DIR, "customer_churn.csv")
@@ -24,34 +27,46 @@ MODELS_DIR = os.path.join(BASE_DIR, "models")
 RESULTS_DIR = os.path.join(BASE_DIR, "results")
 RANDOM_STATE = 42
 
+def build_pipelines():
+    """Retourne les 4 pipelines (preprocessing + SMOTE + modèle)."""
+    lr = Pipeline([
+        ("prep", build_preprocessor()),
+        ("model", LogisticRegression(
+            class_weight="balanced", max_iter=1000, random_state=RANDOM_STATE)),
+    ])
 
-def find_best_threshold(model, X_val, y_val):
-    y_proba = model.predict_proba(X_val)[:, 1]
-    best_thresh, best_f1 = 0.5, 0.0
-    for t in np.arange(0.1, 0.6, 0.01):
-        y_pred = (y_proba >= t).astype(int)
-        score = f1_score(y_val, y_pred, zero_division=0)
-        if score > best_f1:
-            best_f1, best_thresh = score, t
-    print(f"  Seuil optimal : {best_thresh:.2f}  (F1={best_f1:.4f})")
-    return best_thresh
+    rf = ImbPipeline([
+        ("prep", build_preprocessor()),
+        ("smote", SMOTE(random_state=RANDOM_STATE, k_neighbors=5)),
+        ("model", RandomForestClassifier(
+            n_estimators=200, min_samples_leaf=5,
+            random_state=RANDOM_STATE, n_jobs=-1)),
+    ])
 
+    # Gradient Boosting (HistGradientBoosting) : équivalent LightGBM,
+    # gère class_weight nativement, pas de dépendance système (libomp)
+    gb = Pipeline([
+        ("prep", build_preprocessor()),
+        ("model", HistGradientBoostingClassifier(
+            max_iter=300, max_depth=5, learning_rate=0.05,
+            l2_regularization=1.0, class_weight="balanced",
+            early_stopping=True, validation_fraction=0.1,
+            random_state=RANDOM_STATE)),
+    ])
 
-class ThresholdClassifier:
-    def __init__(self, pipeline, threshold=0.5):
-        self.pipeline = pipeline
-        self.threshold = threshold
+    # MLP : 2 couches cachées, early stopping pour limiter l'overfit
+    mlp = ImbPipeline([
+        ("prep", build_preprocessor()),
+        ("smote", SMOTE(random_state=RANDOM_STATE, k_neighbors=5)),
+        ("model", MLPClassifier(
+            hidden_layer_sizes=(64, 32), activation="relu", solver="adam",
+            alpha=1e-3, batch_size=128, learning_rate_init=1e-3,
+            max_iter=200, early_stopping=True, validation_fraction=0.1,
+            n_iter_no_change=10, random_state=RANDOM_STATE)),
+    ])
 
-    def predict(self, X):
-        proba = self.pipeline.predict_proba(X)[:, 1]
-        return (proba >= self.threshold).astype(int)
-
-    def predict_proba(self, X):
-        return self.pipeline.predict_proba(X)
-
-    def fit(self, X, y):
-        self.pipeline.fit(X, y)
-        return self
+    return {"Logistic Regression": lr, "Random Forest": rf,
+            "Gradient Boosting": gb, "MLP": mlp}
 
 
 def main():
@@ -61,58 +76,48 @@ def main():
     print("Chargement des données...")
     X, y = load_data(DATA_PATH)
     print(f"Dataset : {X.shape[0]} clients, {X.shape[1]} features")
-    print(f"Churn : {y.mean():.1%} positifs (déséquilibre ~1:9)\n")
+    print(f"Churn   : {y.mean():.1%} positifs (déséquilibre ~1:9)\n")
 
-    # stratify=y pour préserver les proportions de classes dans chaque split
     X_train, X_test, y_train, y_test = train_test_split(
-        X, y, test_size=0.2, stratify=y, random_state=RANDOM_STATE
-    )
-    # val séparé du test pour calibrer le seuil sans biaiser l'évaluation finale
+        X, y, test_size=0.2, stratify=y, random_state=RANDOM_STATE)
     X_tr, X_val, y_tr, y_val = train_test_split(
-        X_train, y_train, test_size=0.2, stratify=y_train, random_state=RANDOM_STATE
-    )
+        X_train, y_train, test_size=0.2, stratify=y_train,
+        random_state=RANDOM_STATE)
     print(f"Train : {len(X_tr)} | Val : {len(X_val)} | Test : {len(X_test)}")
 
-    print("\n[BASELINE] Régression Logistique avec class_weight='balanced'")
-    lr_base = Pipeline([
-        ("prep", build_preprocessor()),
-        ("model", LogisticRegression(class_weight="balanced", max_iter=1000, random_state=RANDOM_STATE)),
-    ])
-    lr_base.fit(X_tr, y_tr)
-    print("  Recherche du seuil optimal (val set)...")
-    lr_pipeline = ThresholdClassifier(lr_base, threshold=find_best_threshold(lr_base, X_val, y_val))
-
-    # SMOTE sans class_weight pour éviter la sur-correction du déséquilibre
-    print("\n[RANDOM FOREST] avec SMOTE + ajustement de seuil")
-    rf_base = ImbPipeline([
-        ("prep", build_preprocessor()),
-        ("smote", SMOTE(random_state=RANDOM_STATE, k_neighbors=5)),
-        ("model", RandomForestClassifier(n_estimators=200, min_samples_leaf=5, random_state=RANDOM_STATE, n_jobs=-1)),
-    ])
-    rf_base.fit(X_tr, y_tr)
-    print("  Recherche du seuil optimal (val set)...")
-    rf_pipeline = ThresholdClassifier(rf_base, threshold=find_best_threshold(rf_base, X_val, y_val))
-
+    pipelines = build_pipelines()
+    fitted_raw: dict = {}
+    fitted_thresh: dict = {}
     all_metrics = []
-    models = {"Logistic Regression": lr_pipeline, "Random Forest": rf_pipeline}
 
-    for name, model in models.items():
+    for name, pipeline in pipelines.items():
+        print(f"\n[{name.upper()}]")
+        pipeline.fit(X_tr, y_tr)
+        thresh = find_best_threshold(pipeline, X_val, y_val)
+        fitted_raw[name] = pipeline
+        fitted_thresh[name] = ThresholdClassifier(pipeline, threshold=thresh)
+
+    for name, model in fitted_thresh.items():
         all_metrics.append(evaluate_model(name, model, X_test, y_test))
         plot_confusion_matrix(name, model, X_test, y_test)
 
-    # pipelines bruts pour predict_proba sur les courbes ROC/PR
-    plot_roc_curves({"Logistic Regression": lr_base, "Random Forest": rf_base}, X_test, y_test)
-    plot_pr_curves({"Logistic Regression": lr_base, "Random Forest": rf_base}, X_test, y_test)
+    plot_roc_curves(fitted_raw, X_test, y_test)
+    plot_pr_curves(fitted_raw, X_test, y_test)
     save_comparison_table(all_metrics)
 
-    print("\n[CROSS-VALIDATION] Stratified K-Fold (k=5) — Random Forest")
+    # CV stratifié sur le modèle candidat final (Gradient Boosting)
+    print("\n[CROSS-VALIDATION] Stratified K-Fold (k=5) — Gradient Boosting")
     cv = StratifiedKFold(n_splits=5, shuffle=True, random_state=RANDOM_STATE)
-    rf_cv = Pipeline([
+    gb_cv = Pipeline([
         ("prep", build_preprocessor()),
-        ("model", RandomForestClassifier(n_estimators=200, min_samples_leaf=5, class_weight="balanced", random_state=RANDOM_STATE, n_jobs=-1)),
+        ("model", HistGradientBoostingClassifier(
+            max_iter=300, max_depth=5, learning_rate=0.05,
+            class_weight="balanced", random_state=RANDOM_STATE)),
     ])
-    cv_f1 = cross_val_score(rf_cv, X_train, y_train, cv=cv, scoring="f1", n_jobs=-1)
-    cv_roc = cross_val_score(rf_cv, X_train, y_train, cv=cv, scoring="roc_auc", n_jobs=-1)
+    cv_f1 = cross_val_score(gb_cv, X_train, y_train, cv=cv,
+                            scoring="f1", n_jobs=-1)
+    cv_roc = cross_val_score(gb_cv, X_train, y_train, cv=cv,
+                             scoring="roc_auc", n_jobs=-1)
     print(f"  F1      : {cv_f1.mean():.4f} ± {cv_f1.std():.4f}")
     print(f"  ROC-AUC : {cv_roc.mean():.4f} ± {cv_roc.std():.4f}")
 
@@ -129,10 +134,10 @@ def main():
     ])
     rf_class_weight.fit(X_tr, y_tr)
 
-    import pandas as pd
-    from sklearn.metrics import recall_score
     imbalance_results = []
-    for label, m in [("Sans rééquilibrage", rf_no_balance), ("class_weight", rf_class_weight), ("SMOTE", rf_base)]:
+    for label, m in [("Sans rééquilibrage", rf_no_balance),
+                     ("class_weight", rf_class_weight),
+                     ("SMOTE", fitted_raw["Random Forest"])]:
         thresh = find_best_threshold(m, X_val, y_val)
         y_proba = m.predict_proba(X_test)[:, 1]
         y_pred = (y_proba >= thresh).astype(int)
@@ -146,11 +151,23 @@ def main():
     print(df_imbalance.to_string())
     df_imbalance.to_csv(os.path.join(RESULTS_DIR, "imbalance_comparison.csv"))
 
-    for name, model in {"logistic_regression": lr_pipeline, "random_forest": rf_pipeline}.items():
-        path = os.path.join(MODELS_DIR, f"{name}.pkl")
+    file_map = {
+        "Logistic Regression": "logistic_regression",
+        "Random Forest": "random_forest",
+        "Gradient Boosting": "gradient_boosting",
+        "MLP": "mlp",
+    }
+    for name, slug in file_map.items():
+        path = os.path.join(MODELS_DIR, f"{slug}.pkl")
         with open(path, "wb") as f:
-            pickle.dump(model, f)
+            pickle.dump(fitted_thresh[name], f)
         print(f"Modèle sauvegardé : {path}")
+
+    # Modèle candidat final : Gradient Boosting
+    final_path = os.path.join(MODELS_DIR, "final_model.pkl")
+    with open(final_path, "wb") as f:
+        pickle.dump(fitted_thresh["Gradient Boosting"], f)
+    print(f"Modèle candidat final : {final_path}")
 
     print("\nEntraînement terminé.")
 

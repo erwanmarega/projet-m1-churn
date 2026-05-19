@@ -1,0 +1,62 @@
+name: Test Ci 
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: Tests (100% coverage)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+          cache-dependency-glob: |
+            pyproject.toml
+            uv.lock
+
+      - name: Pin Python 3.12
+        run: uv python pin 3.12
+
+      - name: Sync dependencies (with dev extra)
+        run: uv sync --extra dev --frozen || uv sync --extra dev
+
+      - name: Cache trained models
+        id: cache-models
+        uses: actions/cache@v4
+        with:
+          path: models
+          key: models-${{ runner.os }}-${{ hashFiles('train.py', 'src/preprocessing.py', 'src/features.py', 'src/threshold.py', 'customer_churn.csv', 'pyproject.toml') }}
+
+      - name: Train models (cache miss only)
+        if: steps.cache-models.outputs.cache-hit != 'true'
+        run: uv run python train.py
+
+      - name: Verify final model artifact exists
+        run: test -f models/final_model.pkl
+
+      - name: Run pytest with branch coverage (fail_under=100)
+        run: uv run pytest --cov=api --cov-branch --cov-report=term-missing --cov-report=xml
+
+      - name: Upload coverage XML
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-xml
+          path: coverage.xml
+          if-no-files-found: ignore
+          retention-days: 7
