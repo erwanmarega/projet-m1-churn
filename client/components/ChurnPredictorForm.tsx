@@ -172,10 +172,32 @@ const fieldTypes: Record<string, string> = {
 };
 
 const selectOptions: Record<string, string[]> = {
-  gender: ["Male", "Female", "Other"],
-  contract_type: ["Monthly", "Yearly", "Two-Year"],
-  discount_applied: ["Yes", "No"],
-  price_increase_last_3m: ["Yes", "No"],
+  gender: ["Homme", "Femme", "Autre"],
+  contract_type: ["Mensuel", "Annuel", "Deux ans"],
+  discount_applied: ["Oui", "Non"],
+  price_increase_last_3m: ["Oui", "Non"],
+};
+
+// Mapping pour convertir les labels français en valeurs API anglaises
+const frenchToEnglish: Record<string, Record<string, string>> = {
+  gender: {
+    Homme: "Male",
+    Femme: "Female",
+    Autre: "Other",
+  },
+  contract_type: {
+    Mensuel: "Monthly",
+    Annuel: "Yearly",
+    "Deux ans": "Two-Year",
+  },
+  discount_applied: {
+    Oui: "Yes",
+    Non: "No",
+  },
+  price_increase_last_3m: {
+    Oui: "Yes",
+    Non: "No",
+  },
 };
 
 export default function ChurnPredictorForm() {
@@ -233,6 +255,10 @@ export default function ChurnPredictorForm() {
     }
   };
 
+  const translateToEnglish = (field: string, value: string): string => {
+    return frenchToEnglish[field]?.[value] ?? value;
+  };
+
   const handleSubmit = async () => {
     setLoading(true);
     setError(null);
@@ -240,12 +266,15 @@ export default function ChurnPredictorForm() {
 
     try {
       const payload = {
-        gender: formData.gender,
+        gender: translateToEnglish("gender", formData.gender),
         age: Number(formData.age),
         customer_segment: formData.customer_segment,
         tenure_months: Number(formData.tenure_months),
         signup_channel: formData.signup_channel,
-        contract_type: formData.contract_type,
+        contract_type: translateToEnglish(
+          "contract_type",
+          formData.contract_type,
+        ),
         monthly_logins: Number(formData.monthly_logins),
         weekly_active_days: Number(formData.weekly_active_days),
         avg_session_time: Number(formData.avg_session_time),
@@ -256,8 +285,14 @@ export default function ChurnPredictorForm() {
         total_revenue: Number(formData.total_revenue),
         payment_method: formData.payment_method,
         payment_failures: Number(formData.payment_failures),
-        discount_applied: formData.discount_applied,
-        price_increase_last_3m: formData.price_increase_last_3m,
+        discount_applied: translateToEnglish(
+          "discount_applied",
+          formData.discount_applied,
+        ),
+        price_increase_last_3m: translateToEnglish(
+          "price_increase_last_3m",
+          formData.price_increase_last_3m,
+        ),
         support_tickets: Number(formData.support_tickets),
         avg_resolution_time: Number(formData.avg_resolution_time),
         complaint_type: formData.complaint_type || null,
@@ -294,8 +329,23 @@ export default function ChurnPredictorForm() {
 
   if (result) {
     return (
-      <div className="min-h-screen bg-emerald-600 flex items-center justify-center p-4 selection:bg-emerald-200">
-        <Card className="w-full max-w-2xl bg-white shadow-2xl rounded-2xl overflow-hidden border-0">
+      <div className="relative min-h-screen bg-emerald-600 flex items-center justify-center p-4 overflow-hidden selection:bg-emerald-200">
+        <div className="absolute inset-0 pointer-events-none">
+          <div
+            className="absolute -top-[10%] -left-[5%] w-[45vw] h-[45vw] max-w-[500px] max-h-[500px] rounded-full bg-white/40 blur-[80px] animate-pulse"
+            style={{ animationDuration: "4s" }}
+          ></div>
+          <div
+            className="absolute top-[20%] -right-[5%] w-[40vw] h-[50vw] max-w-[400px] max-h-[600px] rounded-full bg-teal-300/50 blur-[90px] animate-pulse"
+            style={{ animationDelay: "1s", animationDuration: "5s" }}
+          ></div>
+          <div
+            className="absolute -bottom-[10%] left-[15%] w-[55vw] h-[45vw] max-w-[600px] max-h-[500px] rounded-full bg-yellow-200/40 blur-[80px] animate-pulse"
+            style={{ animationDelay: "2s", animationDuration: "6s" }}
+          ></div>
+        </div>
+
+        <Card className="relative z-10 w-full max-w-2xl bg-white shadow-2xl rounded-2xl overflow-hidden border-0">
           <div className="p-10">
             <div className="text-center mb-8">
               <div className="inline-flex items-center justify-center w-16 h-16 rounded-full bg-emerald-100 mb-4">
@@ -426,8 +476,24 @@ export default function ChurnPredictorForm() {
   }
 
   return (
-    <div className="min-h-screen bg-emerald-600 flex items-center justify-center p-4 py-12 selection:bg-emerald-200">
-      <Card className="w-full max-w-3xl bg-white shadow-2xl rounded-2xl overflow-hidden border-0">
+    <div className="relative min-h-screen bg-emerald-600 flex items-center justify-center p-4 py-12 overflow-hidden selection:bg-emerald-200">
+      {/* Arrière-plan animé (Blob effect) plus lumineux */}
+      <div className="absolute inset-0 pointer-events-none">
+        <div
+          className="absolute -top-[10%] -left-[5%] w-[45vw] h-[45vw] max-w-[500px] max-h-[500px] rounded-full bg-white/40 blur-[80px] animate-pulse"
+          style={{ animationDuration: "4s" }}
+        ></div>
+        <div
+          className="absolute top-[20%] -right-[5%] w-[40vw] h-[50vw] max-w-[400px] max-h-[600px] rounded-full bg-teal-300/50 blur-[90px] animate-pulse"
+          style={{ animationDelay: "1s", animationDuration: "5s" }}
+        ></div>
+        <div
+          className="absolute -bottom-[10%] left-[15%] w-[55vw] h-[45vw] max-w-[600px] max-h-[500px] rounded-full bg-yellow-200/40 blur-[80px] animate-pulse"
+          style={{ animationDelay: "2s", animationDuration: "6s" }}
+        ></div>
+      </div>
+
+      <Card className="relative z-10 w-full max-w-3xl bg-white shadow-2xl rounded-2xl overflow-hidden border-0">
         <div className="p-8 sm:p-12">
           <div className="mb-10 text-center">
             <h1 className="text-3xl sm:text-4xl font-extrabold text-gray-900 tracking-tight mb-3">
@@ -534,13 +600,21 @@ export default function ChurnPredictorForm() {
                         id={field}
                         type="number"
                         step="0.01"
+                        max={field === "weekly_active_days" ? "7" : undefined}
                         value={formData[fieldName]}
-                        onChange={(e) =>
-                          handleInputChange(
-                            fieldName,
-                            e.target.value === "" ? "" : Number(e.target.value),
-                          )
-                        }
+                        onChange={(e) => {
+                          let value =
+                            e.target.value === "" ? "" : Number(e.target.value);
+                          // Limiter weekly_active_days à 7
+                          if (
+                            field === "weekly_active_days" &&
+                            typeof value === "number" &&
+                            value > 7
+                          ) {
+                            value = 7;
+                          }
+                          handleInputChange(fieldName, value);
+                        }}
                         placeholder="0"
                         className="w-full bg-gray-50 border-gray-200 focus:bg-white focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20 rounded-xl h-12 text-gray-900 transition-colors"
                       />
