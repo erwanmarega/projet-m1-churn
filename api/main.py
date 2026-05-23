@@ -3,6 +3,7 @@ from __future__ import annotations
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
 
 from api.config import Settings, get_settings
 from api.exceptions import ModelNotLoadedError, register_exception_handlers
@@ -37,6 +38,16 @@ def create_app(
         version=settings.model_version,
         lifespan=lifespan,
     )
+    
+    
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=["*"],  
+        allow_credentials=True,
+        allow_methods=["*"],
+        allow_headers=["*"],
+    )
+    
     app.state.model_service = service
     register_exception_handlers(app)
     app.include_router(health_routes.router)
